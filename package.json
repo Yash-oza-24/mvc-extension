@@ -2,7 +2,7 @@
   "name": "mvcfolderstructure",
   "displayName": "mvc-folder-structure",
   "description": "Automatically generates an MVC folder structure for Node.js projects",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.101.0"
   },
