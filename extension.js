@@ -11,6 +11,13 @@ function activate(context) {
             return;
         }
 
+        // Prompt for module type
+        const moduleType = await vscode.window.showQuickPick(
+            ['CommonJS', 'ESM (type=\"module\")'],
+            { placeHolder: 'Select your Node.js module system' }
+        );
+        if (!moduleType) return;
+
         // Prompt for database type
         const dbType = await vscode.window.showQuickPick(
             ['MongoDB', 'MySQL', 'PostgreSQL'],
@@ -21,6 +28,13 @@ function activate(context) {
         // Prompt for database URL
         const dbUrl = await vscode.window.showInputBox({ prompt: `Enter your ${dbType} connection URL` });
         if (!dbUrl) return;
+
+        // For PostgreSQL, prompt for pg-host
+        let pgHost = '';
+        if (dbType === 'PostgreSQL') {
+            pgHost = await vscode.window.showInputBox({ prompt: 'Enter your PostgreSQL host (pg-host)' });
+            if (!pgHost) return;
+        }
 
         // Define the folders to be created
         const folders = [
@@ -43,7 +57,7 @@ function activate(context) {
             }
         });
 
-        // Create a .env file with DB URL
+        // Create a .env file with DB URL and pg-host if needed
         const envFilePath = path.join(rootPath, '.env');
         if (!fs.existsSync(envFilePath)) {
             let envContent = `PORT=3000\n`;
@@ -52,58 +66,52 @@ function activate(context) {
             } else if (dbType === 'MySQL') {
                 envContent += `MYSQL_URL=${dbUrl}\n`;
             } else if (dbType === 'PostgreSQL') {
-                envContent += `PG_URL=${dbUrl}\n`;
+                envContent += `PG_URL=${dbUrl}\nPG_HOST=${pgHost}\n`;
             }
             fs.writeFileSync(envFilePath, envContent);
         }
 
-        // Create a basic index.js server file
-        const appFilePath = path.join(rootPath, 'index.js');
+        // Create a basic server file (index.js or index.mjs)
+        const isESM = moduleType.startsWith('ESM');
+        const appFileName = isESM ? 'index.mjs' : 'index.js';
+        const appFilePath = path.join(rootPath, appFileName);
         if (!fs.existsSync(appFilePath)) {
-            let importDb = `require('./config/db');\n`;
+            let importDb = isESM
+                ? `import './config/db.${isESM ? 'mjs' : 'js'}';\n`
+                : `require('./config/db');\n`;
             let serverCode =
-                `const express = require('express');\n` +
-                `require('dotenv').config();\n` +
-                importDb +
-                `const app = express();\n` +
-                `const port = process.env.PORT || 3000;\n\n` +
-                `app.get('/', (req, res) => {\n    res.send('Server is running!');\n});\n\n` +
-                `app.listen(port, () => {\n    console.log('Server started on port ' + port);\n});\n`;
+                (isESM
+                    ? `// Main server entry (ESM)\nimport express from 'express';\nimport dotenv from 'dotenv';\n${importDb}\ndotenv.config();\nconst app = express();\nconst port = process.env.PORT || 3000;\n\n// Root route\napp.get('/', (req, res) => res.send('Server is running!'));\n\n// Start server\napp.listen(port, () => console.log('Server started on port ' + port));\n`
+                    : `// Main server entry (CommonJS)\nconst express = require('express');\nrequire('dotenv').config();\n${importDb}const app = express();\nconst port = process.env.PORT || 3000;\n\n// Root route\napp.get('/', (req, res) => res.send('Server is running!'));\n\n// Start server\napp.listen(port, () => console.log('Server started on port ' + port));\n`);
             fs.writeFileSync(appFilePath, serverCode);
         }
 
-        // Create a database connection file in config/db.js
+        // Create a database connection file in config/db.js or db.mjs
         const configDir = path.join(rootPath, 'config');
         if (!fs.existsSync(configDir)) {
             fs.mkdirSync(configDir);
         }
-        const dbFilePath = path.join(configDir, 'db.js');
+        const dbFileName = isESM ? 'db.mjs' : 'db.js';
+        const dbFilePath = path.join(configDir, dbFileName);
         if (!fs.existsSync(dbFilePath)) {
             let dbCode = '';
             if (dbType === 'MongoDB') {
-                dbCode =
-                    `const mongoose = require('mongoose');\n` +
-                    `const uri = process.env.MONGO_URI;\n` +
-                    `mongoose.connect(uri, {\n    useNewUrlParser: true,\n    useUnifiedTopology: true\n})\n.then(() => console.log('MongoDB connected'))\n.catch(err => console.error('MongoDB connection error:', err));\n`;
+                dbCode = isESM
+                    ? `// MongoDB connection using Mongoose (ESM)\nimport mongoose from 'mongoose';\nconst uri = process.env.MONGO_URI;\nmongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true })\n    .then(() => console.log('MongoDB connected'))\n    .catch(err => console.error('MongoDB connection error:', err));\n`
+                    : `// MongoDB connection using Mongoose (CommonJS)\nconst mongoose = require('mongoose');\nconst uri = process.env.MONGO_URI;\nmongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true })\n    .then(() => console.log('MongoDB connected'))\n    .catch(err => console.error('MongoDB connection error:', err));\n`;
             } else if (dbType === 'MySQL') {
-                dbCode =
-                    `const mysql = require('mysql2');\n` +
-                    `const url = process.env.MYSQL_URL;\n` +
-                    `const connection = mysql.createConnection(url);\n` +
-                    `connection.connect(err => {\n` +
-                    `  if (err) {\n    console.error('MySQL connection error:', err);\n  } else {\n    console.log('MySQL connected');\n  }\n});\n`;
+                dbCode = isESM
+                    ? `// MySQL connection using mysql2 (ESM)\nimport mysql from 'mysql2';\nconst url = process.env.MYSQL_URL;\nconst connection = mysql.createConnection(url);\nconnection.connect(err => {\n    if (err) {\n        console.error('MySQL connection error:', err);\n    } else {\n        console.log('MySQL connected');\n    }\n});\n`
+                    : `// MySQL connection using mysql2 (CommonJS)\nconst mysql = require('mysql2');\nconst url = process.env.MYSQL_URL;\nconst connection = mysql.createConnection(url);\nconnection.connect(err => {\n    if (err) {\n        console.error('MySQL connection error:', err);\n    } else {\n        console.log('MySQL connected');\n    }\n});\n`;
             } else if (dbType === 'PostgreSQL') {
-                dbCode =
-                    `const { Client } = require('pg');\n` +
-                    `const url = process.env.PG_URL;\n` +
-                    `const client = new Client({ connectionString: url });\n` +
-                    `client.connect(err => {\n` +
-                    `  if (err) {\n    console.error('PostgreSQL connection error:', err);\n  } else {\n    console.log('PostgreSQL connected');\n  }\n});\n`;
+                dbCode = isESM
+                    ? `// PostgreSQL connection using pg (ESM)\nimport pkg from 'pg';\nconst { Client } = pkg;\nconst url = process.env.PG_URL;\nconst host = process.env.PG_HOST;\nconst client = new Client({ connectionString: url, host });\nclient.connect(err => {\n    if (err) {\n        console.error('PostgreSQL connection error:', err);\n    } else {\n        console.log('PostgreSQL connected');\n    }\n});\n`
+                    : `// PostgreSQL connection using pg (CommonJS)\nconst { Client } = require('pg');\nconst url = process.env.PG_URL;\nconst host = process.env.PG_HOST;\nconst client = new Client({ connectionString: url, host });\nclient.connect(err => {\n    if (err) {\n        console.error('PostgreSQL connection error:', err);\n    } else {\n        console.log('PostgreSQL connected');\n    }\n});\n`;
             }
             fs.writeFileSync(dbFilePath, dbCode);
         }
 
-        // Create a package.json file with scripts and dependencies
+        // Create or update package.json with scripts, dependencies, and type
         const packageJsonPath = path.join(rootPath, 'package.json');
         let dependencies = {
             "express": "^4.18.2",
@@ -119,19 +127,20 @@ function activate(context) {
         const packageJson = {
             name: "mvc-backend",
             version: "1.0.0",
-            main: "index.js",
+            main: appFileName,
             scripts: {
-                dev: "nodemon index.js",
-                start: "node index.js"
+                dev: isESM ? `nodemon --watch . --exec node --experimental-specifier-resolution=node ${appFileName}` : "nodemon index.js",
+                start: isESM ? `node --experimental-specifier-resolution=node ${appFileName}` : "node index.js"
             },
             dependencies,
             devDependencies: {
                 "nodemon": "^3.0.1"
-            }
+            },
+            ...(isESM ? { type: "module" } : {})
         };
         fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
-        vscode.window.showInformationMessage('Folders, .env, index.js, and DB connection file created!');
+        vscode.window.showInformationMessage('Professional MVC structure, .env, server, and DB connection created!');
     });
 
     context.subscriptions.push(disposable);
